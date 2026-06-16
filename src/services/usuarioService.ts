@@ -4,7 +4,7 @@ export interface UsuarioPayload {
   nome: string;
   uidRfid: string | null;
   matricula: string | null;
-  perfil: "ADMIN" | "PROFESSOR" | "SERVICOS_GERAIS" | "MONITOR";
+  perfil: "ADMIN" | "COORDENADOR" | "PROFESSOR" | "SERVICOS_GERAIS" | "MONITOR";
   ativo: boolean;
 }
 

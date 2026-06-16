@@ -2,7 +2,7 @@ import api from "./api";
 
 const STORAGE_KEY = "scar_user";
 
-export type AuthProfile = "ADMIN" | "PROFESSOR" | "SERVICOS_GERAIS" | "MONITOR";
+export type AuthProfile = "ADMIN" | "COORDENADOR" | "PROFESSOR" | "SERVICOS_GERAIS" | "MONITOR";
 
 export interface AuthUser {
   id: number;
@@ -27,6 +27,7 @@ interface LoginResponse {
 
 const isAuthProfile = (value: unknown): value is AuthProfile =>
   value === "ADMIN" ||
+  value === "COORDENADOR" ||
   value === "PROFESSOR" ||
   value === "SERVICOS_GERAIS" ||
   value === "MONITOR";

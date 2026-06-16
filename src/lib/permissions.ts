@@ -1,12 +1,12 @@
-export type UserProfile = "ADMIN" | "PROFESSOR" | "SERVICOS_GERAIS" | "MONITOR";
+export type UserProfile = "ADMIN" | "COORDENADOR" | "PROFESSOR" | "SERVICOS_GERAIS" | "MONITOR";
 
 const permissions = {
-  "/": ["ADMIN", "PROFESSOR", "SERVICOS_GERAIS", "MONITOR"],
-  "/usuarios": ["ADMIN"],
-  "/salas": ["ADMIN", "PROFESSOR", "SERVICOS_GERAIS", "MONITOR"],
-  "/movimentacoes": ["ADMIN", "PROFESSOR", "SERVICOS_GERAIS", "MONITOR"],
-  "/logs": ["ADMIN", "MONITOR"],
-  "/configuracoes": ["ADMIN"],
+  "/": ["ADMIN", "COORDENADOR", "PROFESSOR", "SERVICOS_GERAIS", "MONITOR"],
+  "/usuarios": ["ADMIN", "COORDENADOR"],
+  "/salas": ["ADMIN", "COORDENADOR", "PROFESSOR", "SERVICOS_GERAIS", "MONITOR"],
+  "/movimentacoes": ["ADMIN", "COORDENADOR", "PROFESSOR", "SERVICOS_GERAIS", "MONITOR"],
+  "/logs": ["ADMIN", "COORDENADOR", "MONITOR"],
+  "/configuracoes": ["ADMIN", "COORDENADOR"],
 } as const satisfies Record<string, readonly UserProfile[]>;
 
 const normalizePath = (path: string) => {

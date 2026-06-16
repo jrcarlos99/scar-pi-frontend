@@ -26,6 +26,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   Search,
   CreditCard,
@@ -35,6 +37,8 @@ import {
   GraduationCap,
   UserCog,
   Hash,
+  UserPlus,
+  ShieldCheck,
 } from "lucide-react";
 import usuarioService from "@/services/usuarioService";
 import { UserAvatar } from "@/components/UserAvatar";
@@ -45,7 +49,7 @@ export interface Usuario {
   nome: string;
   uidRfid: string | null;
   matricula: string | null;
-  perfil: "ADMIN" | "PROFESSOR" | "SERVICOS_GERAIS" | "MONITOR";
+  perfil: "ADMIN" | "COORDENADOR" | "PROFESSOR" | "SERVICOS_GERAIS" | "MONITOR";
   ativo: boolean;
 }
 
@@ -55,6 +59,12 @@ const perfilConfig = {
     icon: UserCog,
     className:
       "bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200",
+  },
+  COORDENADOR: {
+    label: "Coordenador",
+    icon: ShieldCheck,
+    className:
+      "bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-200",
   },
   PROFESSOR: {
     label: "Professor",
@@ -91,6 +101,7 @@ export default function Usuarios() {
   const [formNome, setFormNome] = useState("");
   const [formPerfil, setFormPerfil] = useState<Usuario["perfil"]>("PROFESSOR");
   const [formMatricula, setFormMatricula] = useState("");
+  const [formUidRfid, setFormUidRfid] = useState("");
   const [formAtivo, setFormAtivo] = useState(false);
 
   useEffect(() => {
@@ -102,7 +113,8 @@ export default function Usuarios() {
       users.filter(
         (u) =>
           u.nome.toLowerCase().includes(query.toLowerCase()) ||
-          (u.matricula ?? "").toLowerCase().includes(query.toLowerCase()),
+          (u.matricula ?? "").toLowerCase().includes(query.toLowerCase()) ||
+          (u.uidRfid ?? "").toLowerCase().includes(query.toLowerCase()),
       ),
     [users, query],
   );
@@ -113,62 +125,85 @@ export default function Usuarios() {
     setFormNome(u.nome);
     setFormPerfil(u.perfil);
     setFormMatricula(u.matricula ?? "");
+    setFormUidRfid(u.uidRfid ?? "");
     setFormAtivo(u.ativo);
 
     setOpen(true);
   };
 
-  const handleSave = () => {
-    if (!target) return;
+  const handleCreateOpen = () => {
+    setTarget(null);
+    setFormNome("");
+    setFormPerfil("PROFESSOR");
+    setFormMatricula("");
+    setFormUidRfid("");
+    setFormAtivo(true);
+    setOpen(true);
+  };
 
+  const handleSave = () => {
     if (!formNome.trim()) {
       toast.error("Nome obrigatório");
       return;
     }
 
-    usuarioService
-      .atualizar(target.id, {
-        nome: formNome.trim(),
-        perfil: formPerfil,
-        matricula: formMatricula.trim() || null,
-        ativo: formAtivo,
-      })
+    const payload = {
+      nome: formNome.trim(),
+      perfil: formPerfil,
+      matricula: formMatricula.trim() || null,
+      uidRfid: formUidRfid.trim() || null,
+      ativo: formAtivo,
+    };
+
+    const action = target
+      ? usuarioService.atualizar(target.id, payload)
+      : usuarioService.cadastrar(payload);
+
+    action
       .then(async () => {
         const res = await usuarioService.listar();
         setUsers(res.data);
 
-        toast.success("Usuário atualizado", {
-          description: `${formNome} foi atualizado com sucesso.`,
+        toast.success(target ? "Usuário atualizado" : "Usuário cadastrado", {
+          description: `${formNome} foi ${
+            target ? "atualizado" : "cadastrado"
+          } com sucesso.`,
         });
 
         setOpen(false);
       })
-      .catch(() => {
-        toast.error("Erro ao atualizar usuário", {
-          description: "Tente novamente mais tarde.",
+      .catch((err) => {
+        const errorMsg = err.response?.data?.mensagem || "Tente novamente mais tarde.";
+        toast.error(target ? "Erro ao atualizar usuário" : "Erro ao cadastrar usuário", {
+          description: errorMsg,
         });
       });
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">
             Gestão de Usuários
           </h1>
           <p className="text-sm text-muted-foreground">
-            Vincule crachás RFID aos professores e equipe.
+            Gerencie usuários do sistema e vincule crachás RFID.
           </p>
         </div>
-        <div className="relative w-full sm:w-72">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Buscar por nome, matrícula ou UID"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="pl-9"
-          />
+        <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="relative w-full sm:w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar por nome, matrícula ou UID"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <Button onClick={handleCreateOpen} className="shrink-0 gap-2">
+            <UserPlus className="h-4 w-4" /> Novo Usuário
+          </Button>
         </div>
       </div>
 
@@ -269,10 +304,10 @@ export default function Usuarios() {
                           size="sm"
                           variant="outline"
                           onClick={() => openLink(u)}
-                          className="hover:bg-primary/10 hover:text-primary hover:border-primary/50 transition-colors"
+                          className="hover:bg-primary/10 hover:text-primary hover:border-primary/50 transition-colors gap-1.5"
                         >
-                          <CreditCard className="h-4 w-4 mr-1.5" />
-                          {u.uidRfid ? "Atualizar" : "Vincular"}
+                          <UserCog className="h-4 w-4" />
+                          {u.uidRfid ? "Editar" : "Vincular"}
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -285,62 +320,122 @@ export default function Usuarios() {
       </Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CreditCard className="h-5 w-5 text-primary" /> Vincular Crachá
-              RFID
+            <DialogTitle className="flex items-center gap-2 text-xl font-semibold">
+              {target ? (
+                <>
+                  <UserCog className="h-5 w-5 text-primary" /> Editar Usuário
+                </>
+              ) : (
+                <>
+                  <UserPlus className="h-5 w-5 text-primary" /> Criar Novo Usuário
+                </>
+              )}
             </DialogTitle>
             <DialogDescription>
-              Aproxime o crachá do leitor ESP32 ou digite o UID manualmente.
+              {target
+                ? "Edite os dados cadastrais, função e permissões do usuário."
+                : "Insira as informações do novo usuário para adicioná-lo ao sistema."}
             </DialogDescription>
           </DialogHeader>
 
           {target && (
-            <div className="flex items-center gap-3 rounded-lg border bg-muted/40 p-3">
+            <div className="flex items-center gap-3 rounded-lg border bg-muted/40 p-3 my-2">
               <UserAvatar name={target.nome} />
               <div>
                 <p className="font-medium">{target.nome}</p>
                 <p className="text-xs text-muted-foreground">
-                  {target.matricula} ·{" "}
+                  {target.matricula || "Sem matrícula"} ·{" "}
                   {perfilConfig[target.perfil]?.label || target.perfil}
                 </p>
               </div>
             </div>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="nome">Nome</Label>
-            <Input
-              id="nome"
-              value={formNome}
-              onChange={(e) => setFormNome(e.target.value)}
-              className="font-mono uppercase"
-              autoFocus
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="matricula">
-              Matrícula
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="nome">Nome Completo</Label>
               <Input
-                id="matricula"
-                value={formMatricula}
-                onChange={(e) => setFormMatricula(e.target.value)}
-                className="font-mono"
-                placeholder="Ex: 2024001"
+                id="nome"
+                value={formNome}
+                onChange={(e) => setFormNome(e.target.value)}
+                placeholder="Ex: ANA CAROLINA LIMA"
+                className="uppercase"
+                autoFocus={!target}
               />
-            </Label>
-            <p className="text-xs text-muted-foreground">
-              Formato hexadecimal: 4 bytes separados por dois pontos.
-            </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="perfil">Perfil / Função</Label>
+                <Select
+                  value={formPerfil}
+                  onValueChange={(val: Usuario["perfil"]) => setFormPerfil(val)}
+                >
+                  <SelectTrigger id="perfil">
+                    <SelectValue placeholder="Selecione a função" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ADMIN">Administrador</SelectItem>
+                    <SelectItem value="COORDENADOR">Coordenador</SelectItem>
+                    <SelectItem value="PROFESSOR">Professor</SelectItem>
+                    <SelectItem value="SERVICOS_GERAIS">Serviços Gerais</SelectItem>
+                    <SelectItem value="MONITOR">Monitor</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="matricula">Matrícula</Label>
+                <Input
+                  id="matricula"
+                  value={formMatricula}
+                  onChange={(e) => setFormMatricula(e.target.value)}
+                  placeholder="Ex: 2024001"
+                  className="font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="uidRfid">UID RFID</Label>
+              <Input
+                id="uidRfid"
+                value={formUidRfid}
+                onChange={(e) => setFormUidRfid(e.target.value)}
+                placeholder="Ex: 04:A2:F1:9C"
+                className="font-mono uppercase"
+              />
+              <p className="text-xs text-muted-foreground leading-normal">
+                Digite o UID hexadecimal com 4 bytes separados por dois pontos ou aproxime o crachá do leitor ESP32.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border p-3 bg-muted/20">
+              <div className="space-y-0.5">
+                <Label htmlFor="ativo" className="text-sm font-medium">
+                  Status do Usuário
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Se desativado, o usuário não poderá acessar as chaves.
+                </p>
+              </div>
+              <Switch
+                id="ativo"
+                checked={formAtivo}
+                onCheckedChange={setFormAtivo}
+              />
+            </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setOpen(false)}>
               Cancelar
             </Button>
             <Button onClick={handleSave}>
-              <CheckCircle2 className="h-4 w-4 mr-1.5" /> Salvar vínculo
+              <CheckCircle2 className="h-4 w-4 mr-1.5" />{" "}
+              {target ? "Salvar alterações" : "Criar usuário"}
             </Button>
           </DialogFooter>
         </DialogContent>
