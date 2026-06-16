@@ -4,44 +4,64 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeftRight, AlertTriangle, CheckCircle2 } from "lucide-react";
-import { useStore } from "@/data/store";
 import { UserAvatar } from "@/components/UserAvatar";
 import { toast } from "sonner";
+import movimentacaoService from "@/services/movimentacaoService";
+import type { LogAtivo } from "@/services/logsAtivoService";
+
+interface User {
+  id: number;
+  nome: string;
+  uidRfid: string | null;
+  matricula: string | null;
+  perfil: string;
+  ativo: boolean;
+}
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  roomId: string;
+  activeLog: LogAtivo | null;
+  users: User[];
+  activeLogs: LogAtivo[];
+  onSuccess: () => void;
 }
 
-export function TransferKeyDialog({ open, onOpenChange, roomId }: Props) {
-  const { rooms, users, transferKey } = useStore();
-  const room = rooms.find((r) => r.id === roomId);
-  const from = users.find((u) => u.id === room?.holderUserId);
+export function TransferKeyDialog({ open, onOpenChange, activeLog, users, activeLogs, onSuccess }: Props) {
   const [step, setStep] = useState<1 | 2>(1);
   const [toId, setToId] = useState<string>("");
 
-  const heldBy = new Set(rooms.filter((r) => r.holderUserId).map((r) => r.holderUserId!));
+  if (!activeLog) return null;
+
+  const heldBy = new Set(activeLogs.map((l) => l.usuarioId));
   const candidates = users.filter((u) =>
-    u.id !== from?.id && u.status === "active" && u.rfidUid && !heldBy.has(u.id),
+    u.id !== activeLog.usuarioId &&
+    u.ativo &&
+    u.uidRfid &&
+    !heldBy.has(u.id),
   );
-  const to = users.find((u) => u.id === toId);
+  const to = users.find((u) => u.id === Number(toId));
 
   const reset = () => { setStep(1); setToId(""); };
   const close = () => { onOpenChange(false); setTimeout(reset, 200); };
 
-  const confirm = () => {
-    if (!room || !from || !to) return;
-    const res = transferKey(room.id, from.id, to.id);
-    if (res.ok) {
-      toast.success("Transferência registrada", { description: res.message });
+  const confirm = async () => {
+    if (!to) return;
+    try {
+      const res = await movimentacaoService.transferir({
+        chaveId: activeLog.chaveId,
+        usuarioDestinoId: to.id,
+      });
+      toast.success("Transferência registrada", {
+        description: res.data?.mensagem || `Custódia da ${activeLog.nomeSala} transferida para ${to.nome}.`,
+      });
+      onSuccess();
       close();
-    } else {
-      toast.error("Não foi possível transferir", { description: res.message });
+    } catch (err: any) {
+      const msg = err.response?.data?.mensagem || "Ocorreu um erro ao tentar transferir a chave.";
+      toast.error("Não foi possível transferir", { description: msg });
     }
   };
-
-  if (!room || !from) return null;
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(o) : close())}>
@@ -56,13 +76,13 @@ export function TransferKeyDialog({ open, onOpenChange, roomId }: Props) {
         </DialogHeader>
 
         <div className="rounded-lg border bg-muted/40 p-3 flex items-center gap-3">
-          <UserAvatar name={from.name} colorHsl={from.avatarColor} size="sm" />
+          <UserAvatar name={activeLog.nomeUsuario} size="sm" />
           <div className="min-w-0 flex-1">
             <p className="text-xs text-muted-foreground">Origem</p>
-            <p className="font-medium text-sm truncate">{from.name}</p>
+            <p className="font-medium text-sm truncate">{activeLog.nomeUsuario}</p>
           </div>
           <div className="text-xs text-muted-foreground">
-            <span className="font-mono">{room.name}</span>
+            <span className="font-mono">{activeLog.nomeSala}</span>
           </div>
         </div>
 
@@ -70,12 +90,12 @@ export function TransferKeyDialog({ open, onOpenChange, roomId }: Props) {
           <div className="space-y-2">
             <Label>Selecionar usuário destino</Label>
             <Select value={toId} onValueChange={setToId}>
-              <SelectTrigger><SelectValue placeholder="Escolha um professor/técnico ativo" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="Escolha um usuário ativo" /></SelectTrigger>
               <SelectContent>
                 {candidates.length === 0 ? (
                   <div className="px-2 py-3 text-xs text-muted-foreground">Nenhum usuário elegível.</div>
                 ) : candidates.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>{u.name} · {u.role}</SelectItem>
+                  <SelectItem key={u.id} value={String(u.id)}>{u.nome} · {u.perfil}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -88,18 +108,18 @@ export function TransferKeyDialog({ open, onOpenChange, roomId }: Props) {
         {step === 2 && to && (
           <div className="space-y-3">
             <div className="rounded-lg border p-3 flex items-center gap-3 bg-success-soft/40">
-              <UserAvatar name={to.name} colorHsl={to.avatarColor} size="sm" />
+              <UserAvatar name={to.nome} size="sm" />
               <div className="min-w-0 flex-1">
                 <p className="text-xs text-muted-foreground">Destino</p>
-                <p className="font-medium text-sm truncate">{to.name}</p>
-                <p className="text-xs text-muted-foreground font-mono">{to.rfidUid}</p>
+                <p className="font-medium text-sm truncate">{to.nome}</p>
+                <p className="text-xs text-muted-foreground font-mono">{to.uidRfid}</p>
               </div>
               <CheckCircle2 className="h-5 w-5 text-success" />
             </div>
             <div className="rounded-md border border-warning/30 bg-warning-soft/50 p-3 flex gap-2 text-xs text-warning-foreground">
               <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
               <p className="text-foreground/80">
-                Será gerado um log de <strong>Troca de Custódia</strong> mantendo a rastreabilidade. A chave passa diretamente para {to.name}.
+                Será gerado um log de <strong>Troca de Custódia</strong> mantendo a rastreabilidade. A chave passa diretamente para {to.nome}.
               </p>
             </div>
           </div>

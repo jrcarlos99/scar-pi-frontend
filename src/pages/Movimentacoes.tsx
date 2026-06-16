@@ -1,47 +1,51 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeftRight, Wrench, UserPlus2, Send, KeyRound } from "lucide-react";
+import { ArrowLeftRight, Wrench, UserPlus2, Send, KeyRound, Loader2, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { useStore } from "@/data/store";
 import { TransferKeyDialog } from "@/components/TransferKeyDialog";
 import { UserAvatar } from "@/components/UserAvatar";
 import { toast } from "sonner";
+import usuarioService from "@/services/usuarioService";
+import chaveService from "@/services/chaveService";
+import logAtivoService, { type LogAtivo } from "@/services/logsAtivoService";
+import movimentacaoService from "@/services/movimentacaoService";
+
+interface User {
+  id: number;
+  nome: string;
+  uidRfid: string | null;
+  matricula: string | null;
+  perfil: string;
+  ativo: boolean;
+}
+
+interface Chave {
+  id: number;
+  nomeSala: string;
+  status: "DISPONIVEL" | "EM_USO";
+}
 
 export default function Movimentacoes() {
-  const { rooms, users, delegations, maintenance, requestMaintenance, createDelegation, simulateMonitorPickup } = useStore();
-  const [transferRoomId, setTransferRoomId] = useState<string | null>(null);
+  const { delegations, createDelegation, simulateMonitorPickup } = useStore();
+  
+  // Real backend states
+  const [realUsers, setRealUsers] = useState<User[]>([]);
+  const [realActiveLogs, setRealActiveLogs] = useState<LogAtivo[]>([]);
+  const [realChaves, setRealChaves] = useState<Chave[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Selected log for transfer
+  const [selectedActiveLog, setSelectedActiveLog] = useState<LogAtivo | null>(null);
 
-  // Maintenance form state
-  const [mRoom, setMRoom] = useState("");
-  const [mName, setMName] = useState("");
-  const [mUid, setMUid] = useState("");
-  const [mReason, setMReason] = useState<"Manutenção" | "Limpeza" | "Inspeção" | "Outro">("Manutenção");
-  const [mTime, setMTime] = useState("30");
-
-  const submitMaintenance = () => {
-    if (!mRoom || !mName.trim() || !mUid.trim()) {
-      toast.error("Preencha todos os campos obrigatórios.");
-      return;
-    }
-    if (!/^([0-9A-Fa-f]{2}:){3}[0-9A-Fa-f]{2}$/.test(mUid.trim())) {
-      toast.error("UID inválido", { description: "Formato: XX:XX:XX:XX" });
-      return;
-    }
-    requestMaintenance({
-      roomId: mRoom,
-      workerName: mName.trim(),
-      badgeUid: mUid.trim().toUpperCase(),
-      reason: mReason,
-      estimatedMinutes: parseInt(mTime, 10) || 30,
-    });
-    toast.success("Solicitação enviada", { description: "Aguardando aprovação do administrador (sino superior)." });
-    setMName(""); setMUid(""); setMTime("30");
-  };
+  // Acesso Avulso form state
+  const [avulsoUserId, setAvulsoUserId] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Delegation form state
   const [dProf, setDProf] = useState("");
@@ -49,8 +53,61 @@ export default function Movimentacoes() {
   const [dMonitor, setDMonitor] = useState("");
   const [dReg, setDReg] = useState("");
 
-  const profsWithKey = users.filter((u) => rooms.some((r) => r.holderUserId === u.id));
-  const roomsOfProf = rooms.filter((r) => r.holderUserId === dProf);
+  const fetchData = async () => {
+    try {
+      const [usersRes, activeRes, chavesRes] = await Promise.all([
+        usuarioService.listar(),
+        logAtivoService.listar(),
+        chaveService.listar(),
+      ]);
+      setRealUsers(usersRes.data || []);
+      setRealActiveLogs(activeRes.data || []);
+      setRealChaves(chavesRes.data || []);
+    } catch (err) {
+      console.error("Erro ao buscar dados do backend:", err);
+      toast.error("Erro ao carregar dados do backend.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const selectedUserForAvulso = realUsers.find((u) => u.id === Number(avulsoUserId));
+  const userActiveLog = realActiveLogs.find((l) => l.usuarioId === Number(avulsoUserId));
+
+  const submitAcessoAvulso = async () => {
+    if (!avulsoUserId) return;
+    setIsSubmitting(true);
+    try {
+      const res = await movimentacaoService.acessoAvulso({
+        usuarioId: Number(avulsoUserId),
+      });
+      toast.success("Acesso manual registrado", {
+        description: res.data?.mensagem || "Operação realizada com sucesso no painel.",
+      });
+      setAvulsoUserId("");
+      await fetchData();
+    } catch (err: any) {
+      const msg = err.response?.data?.mensagem || "Ocorreu um erro ao tentar registrar o acesso avulso.";
+      toast.error("Operação recusada", { description: msg });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const profsWithKey = realUsers.filter((u) =>
+    realActiveLogs.some((l) => l.usuarioId === u.id && u.perfil === "PROFESSOR"),
+  );
+  const roomsOfProf = realActiveLogs
+    .filter((l) => l.usuarioId === Number(dProf))
+    .map((l) => ({
+      id: String(l.chaveId),
+      name: l.nomeSala,
+      building: "Bloco Único",
+    }));
 
   const submitDelegation = () => {
     if (!dProf || !dRoom || !dMonitor.trim() || !dReg.trim()) {
@@ -62,7 +119,14 @@ export default function Movimentacoes() {
     setDMonitor(""); setDReg(""); setDRoom(""); setDProf("");
   };
 
-  const inUseRooms = rooms.filter((r) => r.holderUserId);
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] gap-2">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Carregando dados das movimentações...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -83,24 +147,22 @@ export default function Movimentacoes() {
           <Card className="shadow-card">
             <CardHeader>
               <CardTitle className="text-base">Transferência rápida entre professores</CardTitle>
-              <CardDescription>Selecione uma chave em uso para iniciar a troca de custódia.</CardDescription>
+              <CardDescription>Selecione uma chave em uso para iniciar a troca de custódia direta.</CardDescription>
             </CardHeader>
             <CardContent>
-              {inUseRooms.length === 0 ? (
+              {realActiveLogs.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Nenhuma chave em posse no momento.</p>
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {inUseRooms.map((r) => {
-                    const holder = users.find((u) => u.id === r.holderUserId);
-                    if (!holder) return null;
+                  {realActiveLogs.map((log) => {
                     return (
-                      <div key={r.id} className="rounded-lg border p-3 flex items-center gap-3">
-                        <UserAvatar name={holder.name} colorHsl={holder.avatarColor} size="sm" />
+                      <div key={log.chaveId} className="rounded-lg border p-3 flex items-center gap-3">
+                        <UserAvatar name={log.nomeUsuario} size="sm" />
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate">{holder.name}</p>
-                          <p className="text-xs text-muted-foreground truncate">{r.name} · {r.building}</p>
+                          <p className="text-sm font-medium truncate">{log.nomeUsuario}</p>
+                          <p className="text-xs text-muted-foreground truncate">{log.nomeSala} · {log.perfil}</p>
                         </div>
-                        <Button size="sm" variant="outline" onClick={() => setTransferRoomId(r.id)}>
+                        <Button size="sm" variant="outline" onClick={() => setSelectedActiveLog(log)}>
                           <ArrowLeftRight className="h-3.5 w-3.5 mr-1" /> Transferir
                         </Button>
                       </div>
@@ -112,79 +174,101 @@ export default function Movimentacoes() {
           </Card>
         </TabsContent>
 
-        {/* === MAINTENANCE === */}
+        {/* === MAINTENANCE / ACESSO AVULSO === */}
         <TabsContent value="maintenance">
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="shadow-card">
               <CardHeader>
-                <CardTitle className="text-base">Solicitação avulsa de acesso</CardTitle>
-                <CardDescription>Para funcionários terceirizados (manutenção, limpeza, etc).</CardDescription>
+                <CardTitle className="text-base">Registrar Acesso Avulso (Manual)</CardTitle>
+                <CardDescription>Para professores ou funcionários sem crachá ou com terminal offline.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="space-y-4">
                 <div className="space-y-1.5">
-                  <Label>Sala</Label>
-                  <Select value={mRoom} onValueChange={setMRoom}>
-                    <SelectTrigger><SelectValue placeholder="Selecione a sala" /></SelectTrigger>
+                  <Label>Selecione o usuário</Label>
+                  <Select value={avulsoUserId} onValueChange={setAvulsoUserId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um usuário ativo" />
+                    </SelectTrigger>
                     <SelectContent>
-                      {rooms.map((r) => <SelectItem key={r.id} value={r.id}>{r.name} · {r.building}</SelectItem>)}
+                      {realUsers.length === 0 ? (
+                        <div className="px-2 py-3 text-xs text-muted-foreground">Nenhum usuário carregado.</div>
+                      ) : (
+                        realUsers.filter((u) => u.ativo).map((u) => (
+                          <SelectItem key={u.id} value={String(u.id)}>
+                            {u.nome} · {u.perfil}
+                          </SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Nome do funcionário</Label>
-                  <Input value={mName} onChange={(e) => setMName(e.target.value)} placeholder="Ex.: João da Silva" maxLength={100} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>UID do crachá temporário</Label>
-                  <Input value={mUid} onChange={(e) => setMUid(e.target.value)} placeholder="04:AA:BB:CC" className="font-mono uppercase" maxLength={11} />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label>Motivo</Label>
-                    <Select value={mReason} onValueChange={(v) => setMReason(v as typeof mReason)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Manutenção">Manutenção</SelectItem>
-                        <SelectItem value="Limpeza">Limpeza</SelectItem>
-                        <SelectItem value="Inspeção">Inspeção</SelectItem>
-                        <SelectItem value="Outro">Outro</SelectItem>
-                      </SelectContent>
-                    </Select>
+
+                {selectedUserForAvulso && (
+                  <div className="rounded-lg border p-3 bg-muted/40 space-y-2 text-sm">
+                    <div className="flex items-center gap-2 font-medium">
+                      <UserAvatar name={selectedUserForAvulso.nome} size="sm" />
+                      <span>{selectedUserForAvulso.nome}</span>
+                    </div>
+                    {userActiveLog ? (
+                      <div className="text-xs text-amber-600 bg-amber-55/40 border border-amber-200 rounded p-2 flex items-start gap-1.5">
+                        <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                        <div>
+                          <strong>Possui chave em posse:</strong> {userActiveLog.nomeSala}<br/>
+                          Esta operação registrará a <strong>DEVOLUÇÃO</strong> desta chave, tornando-a disponível no painel.
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-emerald-600 bg-emerald-55/40 border border-emerald-200 rounded p-2 flex items-start gap-1.5">
+                        <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+                        <div>
+                          <strong>Não possui chaves em posse.</strong><br/>
+                          Esta operação registrará a <strong>RETIRADA</strong> da primeira chave disponível.
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="space-y-1.5">
-                    <Label>Tempo estimado (min)</Label>
-                    <Input type="number" min={5} max={480} value={mTime} onChange={(e) => setMTime(e.target.value)} />
-                  </div>
-                </div>
-                <Button onClick={submitMaintenance} className="w-full">
-                  <Send className="h-4 w-4 mr-1.5" /> Enviar solicitação
+                )}
+
+                <Button 
+                  onClick={submitAcessoAvulso} 
+                  className="w-full" 
+                  disabled={!avulsoUserId || isSubmitting}
+                  variant={userActiveLog ? "destructive" : "default"}
+                >
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4 mr-1.5" />
+                  )}
+                  {userActiveLog ? "Registrar DEVOLUÇÃO Manual" : "Registrar RETIRADA Manual"}
                 </Button>
               </CardContent>
             </Card>
 
             <Card className="shadow-card">
               <CardHeader>
-                <CardTitle className="text-base">Solicitações recentes</CardTitle>
-                <CardDescription>{maintenance.length} registradas.</CardDescription>
+                <CardTitle className="text-base">Chaves em posse no momento</CardTitle>
+                <CardDescription>{realActiveLogs.length} registradas no sistema.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                {maintenance.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nenhuma solicitação ainda.</p>
-                ) : maintenance.map((m) => {
-                  const r = rooms.find((x) => x.id === m.roomId);
-                  return (
-                    <div key={m.id} className="rounded-md border p-2.5 text-sm flex items-center gap-3">
-                      <Wrench className="h-4 w-4 text-muted-foreground" />
+                {realActiveLogs.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Nenhuma chave em posse no momento.</p>
+                ) : (
+                  realActiveLogs.map((log) => (
+                    <div key={log.chaveId} className="rounded-md border p-2.5 text-sm flex items-center gap-3">
+                      <KeyRound className="h-4 w-4 text-primary" />
                       <div className="min-w-0 flex-1">
-                        <p className="font-medium truncate">{m.workerName} <span className="text-muted-foreground font-normal">· {m.reason}</span></p>
-                        <p className="text-xs text-muted-foreground">{r?.name} · {m.estimatedMinutes}min · <span className="font-mono">{m.badgeUid}</span></p>
+                        <p className="font-medium truncate">{log.nomeUsuario} <span className="text-muted-foreground font-normal">· {log.perfil}</span></p>
+                        <p className="text-xs text-muted-foreground">
+                          {log.nomeSala} · Retirada em {new Date(log.dataHora).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                        </p>
                       </div>
-                      {m.released
-                        ? <Badge variant="outline" className="bg-success-soft text-success border-success/20">Liberado</Badge>
-                        : <Badge variant="outline" className="bg-warning-soft text-warning border-warning/30">Pendente</Badge>}
+                      <Badge variant="outline" className="bg-warning-soft text-warning border-warning/30">
+                        Em uso
+                      </Badge>
                     </div>
-                  );
-                })}
+                  ))
+                )}
               </CardContent>
             </Card>
           </div>
@@ -206,7 +290,7 @@ export default function Movimentacoes() {
                     <SelectContent>
                       {profsWithKey.length === 0
                         ? <div className="px-2 py-3 text-xs text-muted-foreground">Nenhum professor com chave reservada.</div>
-                        : profsWithKey.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+                        : profsWithKey.map((u) => <SelectItem key={u.id} value={String(u.id)}>{u.nome}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -244,14 +328,14 @@ export default function Movimentacoes() {
                 {delegations.length === 0 ? (
                   <p className="text-sm text-muted-foreground">Nenhuma delegação criada.</p>
                 ) : delegations.map((d) => {
-                  const prof = users.find((u) => u.id === d.professorId);
-                  const room = rooms.find((r) => r.id === d.roomId);
+                  const prof = realUsers.find((u) => String(u.id) === d.professorId);
+                  const room = realChaves.find((r) => String(r.id) === d.roomId);
                   return (
                     <div key={d.id} className="rounded-md border p-2.5 text-sm flex items-center gap-3">
                       <UserPlus2 className="h-4 w-4 text-primary" />
                       <div className="min-w-0 flex-1">
-                        <p className="font-medium truncate">{d.monitorName} <span className="text-muted-foreground font-normal">→ {prof?.name}</span></p>
-                        <p className="text-xs text-muted-foreground">{room?.name} · {d.monitorRegistration}</p>
+                        <p className="font-medium truncate">{d.monitorName} <span className="text-muted-foreground font-normal">→ {prof?.nome}</span></p>
+                        <p className="text-xs text-muted-foreground">{room?.nomeSala} · {d.monitorRegistration}</p>
                       </div>
                       <Button size="sm" variant="outline" onClick={() => simulateMonitorPickup(d.id)}>
                         <KeyRound className="h-3.5 w-3.5 mr-1" /> Simular
@@ -265,11 +349,14 @@ export default function Movimentacoes() {
         </TabsContent>
       </Tabs>
 
-      {transferRoomId && (
+      {selectedActiveLog && (
         <TransferKeyDialog
-          open={!!transferRoomId}
-          onOpenChange={(o) => !o && setTransferRoomId(null)}
-          roomId={transferRoomId}
+          open={!!selectedActiveLog}
+          onOpenChange={(o) => !o && setSelectedActiveLog(null)}
+          activeLog={selectedActiveLog}
+          users={realUsers}
+          activeLogs={realActiveLogs}
+          onSuccess={fetchData}
         />
       )}
     </div>
