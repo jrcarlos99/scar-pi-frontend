@@ -62,6 +62,10 @@ export default function Logs() {
 
   useEffect(() => {
     logsService.listar().then((res) => setLogs(res.data));
+    const intervalo = setInterval(() => {
+      logsService.listar().then((res) => setLogs(res.data));
+    }, 5000);
+    return () => clearInterval(intervalo);
   }, []);
 
   const filtered = useMemo(
